@@ -1,0 +1,77 @@
+def call(Map args = [:]) {
+    def projectKey      = args.projectKey     ?: error("Falta projectKey")
+    def projectName     = args.projectName    ?: projectKey
+    def sources         = args.sources        ?: 'src'
+    def binaries        = args.binaries       ?: 'target'
+    def coverageReport  = args.coverageReport ?: ''
+    def branchName      = args.branchName     ?: env.BRANCH_NAME
+    def projectType     = args.projectType    ?: 'maven' // maven | angular
+    def exclusions      = args.exclusions     ?: ''
+    def testExclusions  = args.testExclusions ?: ''
+
+    def scannerHome = tool name: 'sonar-scanner-linux-new', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+
+    withCredentials([string(credentialsId: 'SECRET_TEXT_JENKINS_SONARQUBE_TOKEN', variable: 'SONAR_TOKEN')]) {
+        withSonarQubeEnv('SonarQube') {
+            def templateFile = "sonar/sonar-${projectType}.properties"
+            def template = libraryResource(templateFile)
+
+            // Transformar listas en strings separados por coma
+            def exStr = exclusions instanceof List ? exclusions.join(',') : exclusions
+            def testExStr = testExclusions instanceof List ? testExclusions.join(',') : testExclusions
+
+            // Reemplazo de valores
+            def settingsContent = template
+                .replace('${projectKey}', projectKey)
+                .replace('${projectName}', projectName)
+                .replace('${sources}', sources)
+                .replace('${binaries}', binaries)
+                .replace('${branchName}', branchName)
+                .replace('${coverageReport}', coverageReport)
+                .replace('${exclusions}', exStr)
+                .replace('${testExclusions}', testExStr)
+
+            writeFile file: "${scannerHome}/conf/sonar-scanner.properties", text: settingsContent
+
+            sh """
+                ${scannerHome}/bin/sonar-scanner \
+                    -Dsonar.login=${SONAR_TOKEN} \
+                    -Dproject.settings=${scannerHome}/conf/sonar-scanner.properties
+            """
+        }
+    }
+}
+
+
+sonar.projectKey=${projectKey}
+sonar.projectName=${projectName}
+sonar.sources=${sources}
+sonar.java.binaries=${binaries}
+sonar.language=java
+sonar.branch.name=${branchName}
+sonar.coverage.jacoco.xmlReportPaths=${coverageReport}
+sonar.exclusions=${exclusions}
+sonar.test.exclusions=${testExclusions}
+sonar.sourceEncoding=UTF-8
+
+
+sonar.projectKey=${projectKey}
+sonar.projectName=${projectName}
+sonar.sources=${sources}
+sonar.language=js
+sonar.branch.name=${branchName}
+sonar.javascript.lcov.reportPaths=${coverageReport}
+sonar.exclusions=${exclusions}
+sonar.test.exclusions=${testExclusions}
+sonar.sourceEncoding=UTF-8
+
+
+codeQualityScan(
+    projectKey: 'frontend-app',
+    projectName: 'Frontend App',
+    projectType: 'angular',
+    sources: 'src',
+    coverageReport: 'coverage/lcov.info',
+    exclusions: ['**/node_modules/**', '**/*.test.ts'],
+    testExclusions: '**/legacy-tests/**'
+)
