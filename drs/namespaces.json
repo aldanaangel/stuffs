@@ -1,0 +1,4 @@
+{
+  "prod": ["prod-namespace-a", "prod-namespace-b"],
+  "drs": ["drs-namespace-a", "drs-namespace-b"]
+}
