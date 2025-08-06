@@ -1,24 +1,13 @@
 import os
-import subprocess
+import sys
 import requests
 import yaml
 
 JENKINS_URL = "http://TU_JENKINS"
 JENKINS_USER = "usuario"
-JENKINS_TOKEN = "token_o_api"
+JENKINS_TOKEN = "token"
 TEMPLATE_PATH = "templates/config_template.xml"
 BASE_PATH = "DEPLOY-CONFIG"
-
-
-def get_changed_yaml_files():
-    result = subprocess.run(
-        ['git', 'diff', '--name-only', 'HEAD~1', 'HEAD'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    changed_files = result.stdout.splitlines()
-    return [f for f in changed_files if f.endswith("config.yaml")]
 
 
 def job_exists(job_path_list):
@@ -52,10 +41,14 @@ def update_config(job_path_list, variables):
         print(f"❌ Error ({response.status_code}) al actualizar {job_path_str}")
 
 
-def procesar_archivos_actualizados():
-    changed_yaml_files = get_changed_yaml_files()
-    for yaml_path in changed_yaml_files:
-        full_path = os.path.join(os.getcwd(), yaml_path)
+def main():
+    yaml_files = sys.argv[1:]
+    if not yaml_files:
+        print("⚠️ No se recibieron archivos como parámetro.")
+        return
+
+    for yaml_path in yaml_files:
+        full_path = os.path.abspath(yaml_path)
         rel_path = os.path.relpath(full_path, BASE_PATH)
         job_path = os.path.dirname(rel_path).split(os.sep)
 
@@ -66,4 +59,5 @@ def procesar_archivos_actualizados():
             print(f"⚠️ El job no existe aún en Jenkins: {'/'.join(job_path)}")
 
 
-procesar_archivos_actualizados()
+if __name__ == "__main__":
+    main()
