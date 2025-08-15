@@ -1,0 +1,21 @@
+// Jenkinsfile del seed job (el que corre jobDsl)
+pipeline {
+    agent any
+    options { timestamps() }
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+        stage('Generar/Actualizar Jobs') {
+            steps {
+                jobDsl(
+          targets: 'dsl/create_jobs.groovy',
+          removedJobAction: 'DELETE',     // elimina jobs cuyo YAML fue borrado
+          removedViewAction: 'DELETE',
+          lookupStrategy: 'SEED_JOB',
+          failOnMissingPlugin: true
+        )
+            }
+        }
+    }
+}
