@@ -1,0 +1,82 @@
+pipeline {
+  agent any
+  options { timestamps() }
+
+  parameters {
+    string(name: 'commitSha', description: 'SHA del commit a reportar', defaultValue: '')
+    string(name: 'buildKey',  description: 'Clave build-status (Required build)', defaultValue: 'jenkins-ci')
+  }
+
+  environment {
+    BITBUCKET_BASE = 'https://bitbucket.tu-dominio.com' // sin slash al final
+  }
+
+  stages {
+    stage('Publish INPROGRESS') {
+      steps {
+        script {
+          if (!params.commitSha?.trim()) { error 'commitSha es requerido' }
+          withCredentials([string(credentialsId: 'bb_pat', variable: 'BB_TOKEN')]) {
+            sh """
+              curl -sS -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer ${BB_TOKEN}" \\
+                "${BITBUCKET_BASE}/rest/build-status/1.0/commits/${params.commitSha}" \\
+                -d '{
+                  "state":"INPROGRESS",
+                  "key":"${params.buildKey}",
+                  "name":"${JOB_NAME} #${BUILD_NUMBER}",
+                  "url":"${BUILD_URL}",
+                  "description":"CI en progreso"
+                }'
+            """
+          }
+        }
+      }
+    }
+
+    stage('Build & Test') {
+      steps {
+        sh 'mvn -B -DskipTests=false clean verify'
+      }
+    }
+
+    // (Opcional) Etapas adicionales con más estados intermedios si quieres granularidad
+    // stage('SonarQube') { ... publicar otra key, p.ej. "sonar-gate" ... }
+  }
+
+  post {
+    success {
+      script {
+        withCredentials([string(credentialsId: 'bb_pat', variable: 'BB_TOKEN')]) {
+          sh """
+            curl -sS -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer ${BB_TOKEN}" \\
+              "${BITBUCKET_BASE}/rest/build-status/1.0/commits/${params.commitSha}" \\
+              -d '{
+                "state":"SUCCESSFUL",
+                "key":"${params.buildKey}",
+                "name":"${JOB_NAME} #${BUILD_NUMBER}",
+                "url":"${BUILD_URL}",
+                "description":"Build OK"
+              }'
+          """
+        }
+      }
+    }
+    failure {
+      script {
+        withCredentials([string(credentialsId: 'bb_pat', variable: 'BB_TOKEN')]) {
+          sh """
+            curl -sS -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer ${BB_TOKEN}" \\
+              "${BITBUCKET_BASE}/rest/build-status/1.0/commits/${params.commitSha}" \\
+              -d '{
+                "state":"FAILED",
+                "key":"${params.buildKey}",
+                "name":"${JOB_NAME} #${BUILD_NUMBER}",
+                "url":"${BUILD_URL}",
+                "description":"Build falló"
+              }'
+          """
+        }
+      }
+    }
+  }
+}
