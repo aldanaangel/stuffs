@@ -1,0 +1,63 @@
+pipeline {
+  agent none
+  options { timestamps(); disableConcurrentBuilds() }
+
+  environment {
+    // Útil si quieres pasar defaults al hijo
+    BUILD_STATUS_KEY = 'jenkins-ci' // pon esta key como "Required build" en Bitbucket
+  }
+
+  triggers {
+    GenericTrigger(
+      genericVariables: [
+        // Evento Bitbucket Server/DC
+        [key: 'eventKey',   value: '$.eventKey',                         expressionType: 'JSONPath'],
+        // Datos repo
+        [key: 'projectKey', value: '$.repository.project.key',           expressionType: 'JSONPath'],
+        [key: 'repoSlug',   value: '$.repository.slug',                  expressionType: 'JSONPath'],
+        // PR
+        [key: 'prFromSha',  value: '$.pullRequest.fromRef.latestCommit', expressionType: 'JSONPath', defaultValue: ''],
+        [key: 'fromRefId',  value: '$.pullRequest.fromRef.id',           expressionType: 'JSONPath', defaultValue: ''],
+        [key: 'toRefId',    value: '$.pullRequest.toRef.id',             expressionType: 'JSONPath', defaultValue: ''],
+        // Push
+        [key: 'pushToSha',  value: '$.changes[0].toHash',                expressionType: 'JSONPath', defaultValue: ''],
+        [key: 'refId',      value: '$.changes[0].refId',                 expressionType: 'JSONPath', defaultValue: '']
+      ],
+      token: 'TOKEN-SEGURO-DEL-WEBHOOK',
+      printContributedVariables: true,
+      printPostContent: false
+    )
+  }
+
+  stages {
+    stage('Dispatch downstream (async)') {
+      steps {
+        script {
+          // Resolver el SHA del commit ya sea PR o push
+          String sha = (prFromSha?.trim()) ?: (pushToSha?.trim())
+          if (!sha) { error "No se pudo resolver commitSha desde el payload" }
+
+          // Decide a qué job hijo enviar (ejemplos)
+          String targetJob
+          if (eventKey?.startsWith('pr:')) {
+            targetJob = 'ci-pr-job'      // job que valida PRs
+          } else if (eventKey == 'repo:refs_changed') {
+            targetJob = 'ci-push-job'    // job que valida pushes
+          } else {
+            error "Evento no soportado: ${eventKey}"
+          }
+
+          // Dispara el hijo y NO espera (no ocupa ejecutor ni cola aquí)
+          build job: targetJob, wait: false, propagate: false, parameters: [
+            string(name: 'commitSha',  value: sha),
+            string(name: 'projectKey', value: projectKey ?: ''),
+            string(name: 'repoSlug',   value: repoSlug   ?: ''),
+            string(name: 'fromRefId',  value: fromRefId  ?: ''),
+            string(name: 'toRefId',    value: toRefId    ?: ''),
+            string(name: 'buildKey',   value: env.BUILD_STATUS_KEY)
+          ]
+        }
+      }
+    }
+  }
+}
