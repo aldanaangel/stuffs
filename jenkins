@@ -1,20 +1,17 @@
 import jenkins.model.Jenkins
 import com.cloudbees.hudson.plugins.folder.Folder
 import org.jenkinsci.plugins.workflow.job.WorkflowJob
-import hudson.model.Item
 
-def printTree(item, prefix = "") {
-    println "${prefix}${item.name}/"
+def j = Jenkins.instance
 
-    item.getItems().each { child ->
-        if (child instanceof Folder) {
-            printTree(child, prefix + "  ")
-        } else if (child instanceof WorkflowJob) {
-            println "${prefix}  - ${child.name}"
-        }
-    }
+println "===== Lista de FOLDERS ====="
+j.getAllItems(Folder).each { folder ->
+    println "- ${folder.fullName}"
 }
 
-println "===== JENKINS TREE ====="
-printTree(Jenkins.instance)
-println "===== FIN ====="
+println "\n===== Lista de PIPELINES ====="
+j.getAllItems(WorkflowJob).each { job ->
+    println "- ${job.fullName}"
+}
+
+println "\n===== FIN ====="
