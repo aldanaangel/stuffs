@@ -1,0 +1,61 @@
+import jenkins.model.*
+import org.jenkinsci.plugins.workflow.job.WorkflowJob
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition
+import com.cloudbees.hudson.plugins.folder.Folder
+
+// Lista de carpetas a iterar → "colombia/a", "colombia/b", "colombia/c"
+def rutas = [
+    "colombia/a",
+    "colombia/b",
+    "colombia/c"
+]
+
+// Script del pipeline "security"
+def pipelineScript = """
+pipeline {
+    agent any
+
+    stages {
+        stage('Init') {
+            steps {
+                echo "Pipeline SECURITY creado vía Script Console"
+            }
+        }
+    }
+}
+"""
+
+def jenkins = Jenkins.instance
+
+rutas.each { ruta ->
+
+    // Separar la ruta en carpetas (colombia , a)
+    def parts = ruta.split("/")
+
+    // Crear las carpetas dinámicamente
+    def parent = jenkins
+    parts.each { folderName ->
+        def existing = parent.getItem(folderName)
+        if (existing == null) {
+            println "📁 Creando carpeta: ${folderName}"
+            existing = parent.createProject(Folder, folderName)
+        }
+        parent = existing
+    }
+
+    // Crear el job security dentro de la ruta final
+    def jobName = "security"
+
+    if (parent.getItem(jobName) != null) {
+        println "⚠️ El job ${ruta}/${jobName} ya existe. Omitiendo."
+        return
+    }
+
+    println "🚀 Creando job: ${ruta}/${jobName}"
+
+    def job = parent.createProject(WorkflowJob, jobName)
+    job.definition = new CpsFlowDefinition(pipelineScript, true)
+    job.save()
+}
+
+println "✅ Proceso completado correctamente"
