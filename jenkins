@@ -1,17 +1,76 @@
-import jenkins.model.Jenkins
-import com.cloudbees.hudson.plugins.folder.Folder
-import org.jenkinsci.plugins.workflow.job.WorkflowJob
+#!/bin/bash
 
-def j = Jenkins.instance
+### ============================================================
+### CONFIGURACIÓN FIJA
+### ============================================================
 
-println "===== Lista de FOLDERS ====="
-j.getAllItems(Folder).each { folder ->
-    println "- ${folder.fullName}"
-}
+# URL del Jenkins
+JENKINS_URL="http://localhost:8080"
 
-println "\n===== Lista de PIPELINES ====="
-j.getAllItems(WorkflowJob).each { job ->
-    println "- ${job.fullName}"
-}
+# Ruta al CLI
+CLI_JAR="/opt/jenkins/jenkins-cli.jar"
 
-println "\n===== FIN ====="
+# Usuario y Token (quemados)
+AUTH_USER="angel"
+AUTH_TOKEN="PON_AQUI_TU_TOKEN"
+
+# Job template existente
+TEMPLATE_JOB="templates/pipeline-base"
+
+# Archivo con la lista de destinos
+DESTINOS_FILE="./jobs.txt"
+
+
+### ============================================================
+### VALIDACIONES
+### ============================================================
+
+if [[ ! -f "$DESTINOS_FILE" ]]; then
+    echo "❌ ERROR: No existe el archivo $DESTINOS_FILE"
+    exit 1
+fi
+
+if [[ ! -f "$CLI_JAR" ]]; then
+    echo "❌ ERROR: No existe el CLI en $CLI_JAR"
+    exit 1
+fi
+
+
+### ============================================================
+### PROCESO
+### ============================================================
+
+echo "==============================================="
+echo "      CREACIÓN MASIVA DE JOBS JENKINS"
+echo "==============================================="
+echo "Template usado: $TEMPLATE_JOB"
+echo "Lista de destinos: $DESTINOS_FILE"
+echo "==============================================="
+
+while IFS= read -r job_destino; do
+
+    # Saltar vacíos o comentarios
+    [[ -z "$job_destino" || "$job_destino" =~ ^# ]] && continue
+
+    echo "➡️  Creando job: $job_destino"
+
+    java -jar "$CLI_JAR" \
+        -s "$JENKINS_URL" \
+        -webSocket \
+        -auth "${AUTH_USER}:${AUTH_TOKEN}" \
+        copy-job "$TEMPLATE_JOB" "$job_destino"
+
+    if [[ $? -eq 0 ]]; then
+        echo "   ✔️  Job creado: $job_destino"
+    else
+        echo "   ❌ ERROR creando: $job_destino"
+    fi
+
+    echo ""
+
+done < "$DESTINOS_FILE"
+
+echo "==============================================="
+echo "        PROCESO COMPLETADO"
+echo "==============================================="
+
