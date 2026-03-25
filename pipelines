@@ -1,28 +1,75 @@
 #!/bin/bash
 
-set -euo pipefail
+set -u
 
-archivo="lista.txt"
-base_dir="./output"
-log_file="script.log"
+# =========================
+# Configuración
+# =========================
+JENKINS_URL="https://TU_JENKINS"
+JENKINS_USER="TU_USUARIO"
+JENKINS_TOKEN="TU_TOKEN"
 
-mkdir -p "$base_dir"
+ARCHIVO="carpetas.txt"
+BASE_DIR="./pipelines"
+LOG_FILE="ejecucion.log"
+CLI_JAR="jenkins-cli.jar"
+TRUSTSTORE="jenkins-trust.jks"
+FOLDER_PADRE="colombia"
 
-while IFS= read -r carpeta; do
+# =========================
+# Validaciones iniciales
+# =========================
+if [[ ! -f "$ARCHIVO" ]]; then
+    echo "[ERROR] No existe el archivo: $ARCHIVO"
+    exit 1
+fi
+
+if [[ ! -f "$CLI_JAR" ]]; then
+    echo "[ERROR] No existe el archivo: $CLI_JAR"
+    exit 1
+fi
+
+mkdir -p "$BASE_DIR"
+touch "$LOG_FILE"
+
+# =========================
+# Proceso
+# =========================
+while IFS= read -r carpeta || [[ -n "$carpeta" ]]; do
+    # Limpiar CRLF y espacios al inicio/final
+    carpeta="$(echo "$carpeta" | tr -d '\r' | xargs)"
+
+    # Ignorar líneas vacías o comentarios
     [[ -z "$carpeta" || "$carpeta" =~ ^# ]] && continue
 
-    # Validación básica (evitar rutas peligrosas)
+    # Validación básica
     if [[ "$carpeta" == *".."* ]]; then
-        echo "[ERROR] Ruta inválida: $carpeta" | tee -a "$log_file"
+        echo "[ERROR] $(date) - Ruta inválida: $carpeta" | tee -a "$LOG_FILE"
         continue
     fi
 
-    ruta="$base_dir/$carpeta"
+    ruta_local="$BASE_DIR/$carpeta"
+    archivo_salida="${carpeta}-folder.xml"
 
-    if mkdir -p "$ruta"; then
-        echo "[OK] $(date) - Creado: $ruta" | tee -a "$log_file"
+    # Crear carpeta local
+    if mkdir -p "$ruta_local"; then
+        echo "[OK] $(date) - Carpeta local creada: $ruta_local" | tee -a "$LOG_FILE"
     else
-        echo "[ERROR] $(date) - Falló: $ruta" | tee -a "$log_file"
+        echo "[ERROR] $(date) - No se pudo crear carpeta local: $ruta_local" | tee -a "$LOG_FILE"
+        continue
     fi
 
-done < "$archivo"
+    # Ejecutar comando Java por cada línea
+    if java \
+        -Djavax.net.ssl.trustStore="$TRUSTSTORE" \
+        -jar "$CLI_JAR" \
+        -s "$JENKINS_URL" \
+        -auth "$JENKINS_USER:$JENKINS_TOKEN" \
+        get-job "$FOLDER_PADRE/$carpeta" > "$archivo_salida"; then
+
+        echo "[OK] $(date) - XML exportado: $FOLDER_PADRE/$carpeta -> $archivo_salida" | tee -a "$LOG_FILE"
+    else
+        echo "[ERROR] $(date) - Falló comando Jenkins CLI para: $FOLDER_PADRE/$carpeta" | tee -a "$LOG_FILE"
+    fi
+
+done < "$ARCHIVO"
