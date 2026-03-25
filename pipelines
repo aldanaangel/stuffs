@@ -1,7 +1,28 @@
 #!/bin/bash
 
-archivo="lista.txt"
+set -euo pipefail
 
-while IFS= read -r linea; do
-    echo "Procesando: $linea"
+archivo="lista.txt"
+base_dir="./output"
+log_file="script.log"
+
+mkdir -p "$base_dir"
+
+while IFS= read -r carpeta; do
+    [[ -z "$carpeta" || "$carpeta" =~ ^# ]] && continue
+
+    # Validación básica (evitar rutas peligrosas)
+    if [[ "$carpeta" == *".."* ]]; then
+        echo "[ERROR] Ruta inválida: $carpeta" | tee -a "$log_file"
+        continue
+    fi
+
+    ruta="$base_dir/$carpeta"
+
+    if mkdir -p "$ruta"; then
+        echo "[OK] $(date) - Creado: $ruta" | tee -a "$log_file"
+    else
+        echo "[ERROR] $(date) - Falló: $ruta" | tee -a "$log_file"
+    fi
+
 done < "$archivo"
