@@ -1,0 +1,7 @@
+#!/bin/bash
+
+archivo="lista.txt"
+
+while IFS= read -r linea; do
+    echo "Procesando: $linea"
+done < "$archivo"
