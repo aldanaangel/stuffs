@@ -214,3 +214,94 @@ pipeline {
         }
     }
 }
+
+
+------------------------------------------------------------------------------
+stage('Generando jobs') {
+    steps {
+        script {
+
+            def global_config_files = env.CONFIG_FILES.split(',')
+
+            global_config_files.each { global_config_file ->
+
+                echo "Procesando: ${global_config_file}"
+
+                jobDsl(
+                    targets: 'dsl/pipelines.groovy',
+                    additionalParameters: [
+                        CONFIG_PATH: global_config_file
+                    ],
+                    removedJobAction: 'IGNORE',
+                    removedViewAction: 'IGNORE',
+                    sandbox: true
+                )
+            }
+        }
+    }
+}
+
+-----------------------------------------------------------------------------
+
+import groovy.json.JsonSlurper
+
+def configText = readFileFromWorkspace(CONFIG_PATH)
+
+def config = new JsonSlurper()
+    .parseText(configText)
+
+def normalizedPath = CONFIG_PATH
+    .replace('\\', '/')
+    .replaceFirst(/^projects\//, '')
+
+def parts = normalizedPath.split('/')
+
+def country = parts[0]
+def ap = parts[1]
+def projectName = parts[2]
+
+def repositoryUrl = config.repositoryUrl
+def tokenOcp = config.tokenOcp
+
+
+println "Country: ${country}"
+println "AP: ${ap}"
+println "Project: ${projectName}"
+
+
+folder(country)
+
+folder("${country}/${ap}")
+
+folder("${country}/${ap}/${projectName}")
+
+
+['dev', 'qa', 'master'].each { branch ->
+
+    def jobName =
+        "${country}/${ap}/${projectName}/${branch}"
+
+    println "Generando: ${jobName}"
+
+    pipelineJob(jobName) {
+
+        description(
+            "Pipeline ${projectName} - ${branch}"
+        )
+
+        definition {
+            cps {
+
+                script("""
+                    @Library('Openshift-Shared-Library') _
+                    genericPipeline(
+                        '${repositoryUrl}',
+                        '${tokenOcp}'
+                    )
+                """.stripIndent())
+
+                sandbox(true)
+            }
+        }
+    }
+}
