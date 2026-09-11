@@ -1,0 +1,216 @@
+pipeline {
+
+    agent any
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
+    parameters {
+
+        choice(
+            name: 'SCOPE',
+            choices: [
+                'ALL',
+                'COUNTRY',
+                'PROJECT'
+            ],
+            description: 'Alcance de la generación'
+        )
+
+        string(
+            name: 'COUNTRY',
+            defaultValue: '',
+            description: 'País. Ejemplo: colombia'
+        )
+
+        string(
+            name: 'AP',
+            defaultValue: '',
+            description: 'AP. Ejemplo: ap9914'
+        )
+
+        string(
+            name: 'PROJECT',
+            defaultValue: '',
+            description: 'Proyecto. Ejemplo: webview-av-villas'
+        )
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Validate Parameters') {
+            steps {
+                script {
+
+                    switch (params.SCOPE) {
+
+                        case 'ALL':
+                            echo 'Scope seleccionado: ALL'
+                            break
+
+                        case 'COUNTRY':
+
+                            if (!params.COUNTRY?.trim()) {
+                                error(
+                                    'El parámetro COUNTRY es obligatorio ' +
+                                    'cuando SCOPE=COUNTRY'
+                                )
+                            }
+
+                            echo "Scope seleccionado: COUNTRY - ${params.COUNTRY}"
+                            break
+
+                        case 'PROJECT':
+
+                            if (!params.COUNTRY?.trim()) {
+                                error(
+                                    'El parámetro COUNTRY es obligatorio ' +
+                                    'cuando SCOPE=PROJECT'
+                                )
+                            }
+
+                            if (!params.AP?.trim()) {
+                                error(
+                                    'El parámetro AP es obligatorio ' +
+                                    'cuando SCOPE=PROJECT'
+                                )
+                            }
+
+                            if (!params.PROJECT?.trim()) {
+                                error(
+                                    'El parámetro PROJECT es obligatorio ' +
+                                    'cuando SCOPE=PROJECT'
+                                )
+                            }
+
+                            echo """
+                                Scope seleccionado: PROJECT
+                                Country: ${params.COUNTRY}
+                                AP:      ${params.AP}
+                                Project: ${params.PROJECT}
+                            """.stripIndent()
+
+                            break
+
+                        default:
+                            error "SCOPE no soportado: ${params.SCOPE}"
+                    }
+                }
+            }
+        }
+
+        stage('Resolve Configurations') {
+            steps {
+                script {
+
+                    List<String> configs = []
+
+                    switch (params.SCOPE) {
+
+                        case 'ALL':
+
+                            configs = findFiles(
+                                glob: 'projects/**/global-configuration.json'
+                            ).collect {
+                                it.path
+                            }
+
+                            break
+
+                        case 'COUNTRY':
+
+                            configs = findFiles(
+                                glob: "projects/${params.COUNTRY.trim()}/**/global-configuration.json"
+                            ).collect {
+                                it.path
+                            }
+
+                            break
+
+                        case 'PROJECT':
+
+                            String configPath =
+                                "projects/" +
+                                "${params.COUNTRY.trim()}/" +
+                                "${params.AP.trim()}/" +
+                                "${params.PROJECT.trim()}/" +
+                                "global-configuration.json"
+
+                            if (!fileExists(configPath)) {
+                                error """
+                                    No se encontró la configuración:
+
+                                    ${configPath}
+                                """.stripIndent()
+                            }
+
+                            configs = [configPath]
+
+                            break
+                    }
+
+                    if (configs.isEmpty()) {
+                        error """
+                            No se encontraron archivos global-configuration.json
+                            para SCOPE=${params.SCOPE}
+                        """.stripIndent()
+                    }
+
+                    // Orden determinista
+                    configs = configs.sort()
+
+                    echo "Configuraciones encontradas: ${configs.size()}"
+
+                    configs.each { config ->
+                        echo " - ${config}"
+                    }
+
+                    // La dejamos disponible para los siguientes stages.
+                    env.CONFIG_FILES = configs.join(',')
+                }
+            }
+        }
+
+        stage('Process Configurations') {
+            steps {
+                script {
+
+                    def configs = env.CONFIG_FILES.split(',')
+
+                    configs.each { configPath ->
+
+                        echo """
+                            ----------------------------------------
+                            Procesando:
+                            ${configPath}
+                            ----------------------------------------
+                        """.stripIndent()
+
+                        // Próximo paso:
+                        // leer global-configuration.json
+                        // ejecutar Job DSL
+                        // generar dev / qa / master
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Generación finalizada correctamente.'
+        }
+
+        failure {
+            echo 'La generación finalizó con errores.'
+        }
+    }
+}
