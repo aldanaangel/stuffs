@@ -305,3 +305,36 @@ folder("${country}/${ap}/${projectName}")
         }
     }
 }
+---------------------------------------------------------------------
+
+properties {
+    pipelineTriggers {
+        triggers {
+            gitlabPush {
+
+                // No ejecutar por pushes normales
+                triggerOnPush(false)
+
+                // No ejecutar al crear/actualizar un Merge Request
+                triggerOnMergeRequest(false)
+
+                // Ejecutar cuando el Merge Request sea aceptado/mergeado
+                triggerOnAcceptedMergeRequest(true)
+
+                // No ejecutar al cerrar un MR sin merge
+                triggerOnClosedMergeRequest(false)
+
+                // Otros eventos deshabilitados
+                triggerOnNoteRequest(false)
+                triggerOnPipelineEvent(false)
+
+                // Filtrar por rama destino
+                branchFilterType('RegexBasedFilter')
+                targetBranchRegex("^${branch}\$")
+
+                // Secret configurado también en el Webhook de GitLab
+                secretToken(gitlabSecretToken)
+            }
+        }
+    }
+}
