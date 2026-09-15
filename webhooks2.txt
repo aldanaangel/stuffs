@@ -256,3 +256,51 @@ echo
 echo "=================================================="
 echo "PROCESO TERMINADO"
 echo "=================================================="
+
+
+
+
+
+# ============================================================
+# OBTENER TOKEN SEGUN PAIS
+# ============================================================
+
+get_webhook_token() {
+
+    local country
+    country=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+
+    case "${country}" in
+
+        colombia|co)
+            echo "${WEBHOOK_TOKEN_CO:?WEBHOOK_TOKEN_CO no está definido}"
+            ;;
+
+        chile|cl)
+            echo "${WEBHOOK_TOKEN_CL:?WEBHOOK_TOKEN_CL no está definido}"
+            ;;
+
+        peru|pe)
+            echo "${WEBHOOK_TOKEN_PE:?WEBHOOK_TOKEN_PE no está definido}"
+            ;;
+
+        mexico|mx)
+            echo "${WEBHOOK_TOKEN_MX:?WEBHOOK_TOKEN_MX no está definido}"
+            ;;
+
+        *)
+            echo "ERROR: País no soportado: ${country}" >&2
+            exit 1
+            ;;
+    esac
+}
+
+
+# ============================================================
+# SELECCIONAR TOKEN
+# ============================================================
+
+WEBHOOK_SECRET=$(get_webhook_token "${COUNTRY}")
+
+echo "Country seleccionado: ${COUNTRY}"
+echo "Token seleccionado correctamente."
