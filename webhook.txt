@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# ============================================================
+# CONFIGURACION
+# ============================================================
+
+GITLAB_URL="https://gitlab.midominio.com"
+GITLAB_TOKEN="${GITLAB_TOKEN:?GITLAB_TOKEN no está definido}"
+
+GROUP_ID="${1:?Debes indicar el GROUP_ID}"
+
+JENKINS_URL="https://jenkins.midominio.com"
+
+WEBHOOK_SECRET="${WEBHOOK_SECRET:?WEBHOOK_SECRET no está definido}"
+
+# true  = incluye proyectos dentro de subgrupos
+# false = solamente proyectos directamente dentro del grupo
+INCLUDE_SUBGROUPS="true"
+
+
+# ============================================================
+# FUNCION: CREAR WEBHOOK
+# ============================================================
+
+create_webhook() {
+
+    local project_id="$1"
+    local project_name="$2"
+    local branch="$3"
+    local environment="$4"
+
+    local webhook_url
+    webhook_url="${JENKINS_URL}/project/${project_name}/${environment}"
+
+    echo "--------------------------------------------------"
+    echo "Proyecto : ${project_name}"
+    echo "ID       : ${project_id}"
+    echo "Branch   : ${branch}"
+    echo "Ambiente : ${environment}"
+    echo "Webhook  : ${webhook_url}"
+
+
+    # ========================================================
+    # VALIDAR SI EL WEBHOOK YA EXISTE
+    # ========================================================
+
+    local existing_hook
+
+    existing_hook=$(
+        curl --silent --fail \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/hooks" |
+        jq -r \
+            --arg url "${webhook_url}" \
+            --arg branch "^${branch}$" \
+            '
+            .[]
+            | select(
+                .url == $url
+                and .push_events == true
+                and .push_events_branch_filter == $branch
+            )
+            | .id
+            ' |
+        head -n1
+    )
+
+
+    if [[ -n "${existing_hook}" ]]; then
+
+        echo "Webhook ya existe. ID: ${existing_hook}"
+
+        return
+    fi
+
+
+    # ========================================================
+    # CREAR WEBHOOK
+    # ========================================================
+
+    echo "Creando webhook..."
+
+    curl --silent \
+        --show-error \
+        --fail \
+        --request POST \
+        --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+        --header "Content-Type: application/json" \
+        --data "{
+            \"url\": \"${webhook_url}\",
+            \"token\": \"${WEBHOOK_SECRET}\",
+
+            \"push_events\": true,
+
+            \"branch_filter_strategy\": \"regex\",
+            \"push_events_branch_filter\": \"^${branch}$\",
+
+            \"merge_requests_events\": false,
+            \"tag_push_events\": false,
+            \"pipeline_events\": false,
+
+            \"enable_ssl_verification\": true
+        }" \
+        "${GITLAB_URL}/api/v4/projects/${project_id}/hooks" |
+        jq '{
+            id,
+            url,
+            push_events,
+            push_events_branch_filter
+        }'
+
+    echo "Webhook creado."
+}
+
+
+# ============================================================
+# FUNCION: CONFIGURAR PROYECTO
+# ============================================================
+
+configure_project() {
+
+    local project_id="$1"
+    local project_name="$2"
+
+    echo
+    echo "=================================================="
+    echo "Configurando proyecto: ${project_name}"
+    echo "Project ID: ${project_id}"
+    echo "=================================================="
+
+    create_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "develop" \
+        "dev"
+
+    create_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "qa" \
+        "qa"
+
+    create_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "main" \
+        "master"
+}
+
+
+# ============================================================
+# CONSULTAR PROYECTOS DEL GRUPO
+# ============================================================
+
+echo "Consultando proyectos del grupo ${GROUP_ID}..."
+
+page=1
+
+while true; do
+
+    response=$(
+        curl --silent \
+            --show-error \
+            --fail \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/groups/${GROUP_ID}/projects?include_subgroups=${INCLUDE_SUBGROUPS}&with_shared=false&per_page=100&page=${page}"
+    )
+
+    project_count=$(echo "${response}" | jq 'length')
+
+
+    # Si no vienen proyectos, terminamos paginación
+    if [[ "${project_count}" -eq 0 ]]; then
+        break
+    fi
+
+
+    # ========================================================
+    # RECORRER PROYECTOS
+    # ========================================================
+
+    while IFS=$'\t' read -r project_id project_name; do
+
+        configure_project \
+            "${project_id}" \
+            "${project_name}"
+
+    done < <(
+        echo "${response}" |
+        jq -r '.[] | [.id, .path] | @tsv'
+    )
+
+
+    # Si llegaron menos de 100 ya estamos en la última página
+    if [[ "${project_count}" -lt 100 ]]; then
+        break
+    fi
+
+    ((page++))
+done
+
+
+echo
+echo "=================================================="
+echo "Proceso terminado"
+echo "=================================================="
