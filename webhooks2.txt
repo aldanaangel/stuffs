@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# ============================================================
+# CONFIGURACION
+# ============================================================
+
+GITLAB_URL="https://gitlab.midominio.com"
+
+GITLAB_TOKEN="${GITLAB_TOKEN:?GITLAB_TOKEN no está definido}"
+WEBHOOK_SECRET="${WEBHOOK_SECRET:?WEBHOOK_SECRET no está definido}"
+
+GROUP_ID="${1:?Debes indicar el GROUP_ID}"
+
+JENKINS_URL="https://jenkins.midominio.com"
+
+INCLUDE_SUBGROUPS="true"
+
+
+# ============================================================
+# FUNCION: CREAR O ACTUALIZAR WEBHOOK
+# ============================================================
+
+reconcile_webhook() {
+
+    local project_id="$1"
+    local project_name="$2"
+    local branch="$3"
+
+    local branch_regex="^${branch}$"
+
+    # Ajusta esta URL a la estructura real de tus Jobs Jenkins
+    local webhook_url="${JENKINS_URL}/project/${project_name}/${branch}"
+
+    echo
+    echo "--------------------------------------------------"
+    echo "Repo    : ${project_name}"
+    echo "ID      : ${project_id}"
+    echo "Branch  : ${branch}"
+    echo "Regex   : ${branch_regex}"
+    echo "Webhook : ${webhook_url}"
+
+
+    # ========================================================
+    # CONSULTAR WEBHOOKS DEL REPOSITORIO
+    # ========================================================
+
+    local hooks
+
+    hooks=$(
+        curl --silent \
+            --show-error \
+            --fail \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/hooks"
+    )
+
+
+    # ========================================================
+    # BUSCAR WEBHOOK POR RAMA
+    # ========================================================
+
+    local hook_id
+
+    hook_id=$(
+        echo "${hooks}" |
+        jq -r \
+            --arg branch "${branch_regex}" \
+            '
+            .[]
+            | select(
+                .push_events == true
+                and .branch_filter_strategy == "regex"
+                and .push_events_branch_filter == $branch
+            )
+            | .id
+            ' |
+        head -n1
+    )
+
+
+    # ========================================================
+    # PAYLOAD DESEADO
+    # ========================================================
+
+    local payload
+
+    payload=$(
+        jq -n \
+            --arg url "${webhook_url}" \
+            --arg token "${WEBHOOK_SECRET}" \
+            --arg branch "${branch_regex}" \
+            '{
+                url: $url,
+                token: $token,
+
+                push_events: true,
+
+                branch_filter_strategy: "regex",
+                push_events_branch_filter: $branch,
+
+                merge_requests_events: false,
+                tag_push_events: false,
+                pipeline_events: false,
+
+                enable_ssl_verification: true
+            }'
+    )
+
+
+    # ========================================================
+    # SI EXISTE -> ACTUALIZAR
+    # ========================================================
+
+    if [[ -n "${hook_id}" ]]; then
+
+        echo "Webhook encontrado."
+        echo "Hook ID: ${hook_id}"
+        echo "Actualizando..."
+
+        curl --silent \
+            --show-error \
+            --fail \
+            --request PUT \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/hooks/${hook_id}" |
+        jq '{
+            id,
+            url,
+            push_events,
+            branch_filter_strategy,
+            push_events_branch_filter,
+            enable_ssl_verification
+        }'
+
+        echo "Webhook actualizado."
+
+    # ========================================================
+    # SI NO EXISTE -> CREAR
+    # ========================================================
+
+    else
+
+        echo "Webhook no encontrado."
+        echo "Creando..."
+
+        curl --silent \
+            --show-error \
+            --fail \
+            --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/hooks" |
+        jq '{
+            id,
+            url,
+            push_events,
+            branch_filter_strategy,
+            push_events_branch_filter,
+            enable_ssl_verification
+        }'
+
+        echo "Webhook creado."
+
+    fi
+}
+
+
+# ============================================================
+# FUNCION: CONFIGURAR REPOSITORIO
+# ============================================================
+
+configure_project() {
+
+    local project_id="$1"
+    local project_name="$2"
+
+    echo
+    echo "=================================================="
+    echo "CONFIGURANDO: ${project_name}"
+    echo "PROJECT ID  : ${project_id}"
+    echo "=================================================="
+
+    reconcile_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "dev"
+
+    reconcile_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "qa"
+
+    reconcile_webhook \
+        "${project_id}" \
+        "${project_name}" \
+        "master"
+}
+
+
+# ============================================================
+# CONSULTAR PROYECTOS DEL GRUPO
+# ============================================================
+
+echo
+echo "Consultando proyectos del grupo ${GROUP_ID}..."
+
+page=1
+
+while true; do
+
+    response=$(
+        curl --silent \
+            --show-error \
+            --fail \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/groups/${GROUP_ID}/projects?include_subgroups=${INCLUDE_SUBGROUPS}&with_shared=false&per_page=100&page=${page}"
+    )
+
+    project_count=$(echo "${response}" | jq 'length')
+
+    if [[ "${project_count}" -eq 0 ]]; then
+        break
+    fi
+
+
+    # ========================================================
+    # RECORRER REPOSITORIOS
+    # ========================================================
+
+    while IFS=$'\t' read -r project_id project_name; do
+
+        configure_project \
+            "${project_id}" \
+            "${project_name}"
+
+    done < <(
+        echo "${response}" |
+        jq -r '.[] | [.id, .path] | @tsv'
+    )
+
+
+    if [[ "${project_count}" -lt 100 ]]; then
+        break
+    fi
+
+    ((page++))
+done
+
+
+echo
+echo "=================================================="
+echo "PROCESO TERMINADO"
+echo "=================================================="
