@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+
+# ============================================================
+# PARAMETROS
+# ============================================================
+
+GROUP_ID="${1:?Debes indicar el GROUP_ID}"
+
+
+# ============================================================
+# CONFIGURACION
+# ============================================================
+
+GITLAB_URL="https://gitlab.midominio.com"
+
+GITLAB_TOKEN="${GITLAB_TOKEN:?GITLAB_TOKEN no está definido}"
+
+INCLUDE_SUBGROUPS="true"
+
+
+# ============================================================
+# VALIDAR SI EXISTE UNA RAMA
+# ============================================================
+
+branch_exists() {
+
+    local project_id="$1"
+    local branch="$2"
+
+    local http_code
+
+    http_code=$(
+        curl --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/repository/branches/${branch}"
+    )
+
+    case "${http_code}" in
+
+        200)
+            return 0
+            ;;
+
+        404)
+            return 1
+            ;;
+
+        *)
+            echo "[ERROR] No fue posible consultar la rama '${branch}'." >&2
+            echo "        Project ID: ${project_id}" >&2
+            echo "        HTTP: ${http_code}" >&2
+            return 2
+            ;;
+    esac
+}
+
+
+# ============================================================
+# CREAR O ACTUALIZAR PROTECCION
+# ============================================================
+
+configure_branch_protection() {
+
+    local project_id="$1"
+    local project_name="$2"
+    local branch="$3"
+    local merge_level="$4"
+
+    local http_code
+    local temp_file
+
+    echo
+    echo "--------------------------------------------------"
+    echo "Repo        : ${project_name}"
+    echo "Project ID  : ${project_id}"
+    echo "Branch      : ${branch}"
+    echo "Push        : No one"
+    echo "Merge level : ${merge_level}"
+    echo "Force push  : Disabled"
+
+    # ========================================================
+    # VALIDAR QUE LA RAMA EXISTA
+    # ========================================================
+
+    if branch_exists "${project_id}" "${branch}"; then
+
+        echo "[OK] Rama '${branch}' encontrada."
+
+    else
+
+        local status=$?
+
+        if [[ "${status}" -eq 1 ]]; then
+
+            echo "[SKIP] La rama '${branch}' no existe en '${project_name}'."
+            return 0
+
+        fi
+
+        echo "[ERROR] No se pudo validar '${branch}'."
+        return 1
+    fi
+
+
+    # ========================================================
+    # CONSULTAR PROTECCION ACTUAL
+    # ========================================================
+
+    temp_file=$(mktemp)
+
+    http_code=$(
+        curl --silent \
+            --output "${temp_file}" \
+            --write-out "%{http_code}" \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/protected_branches/${branch}"
+    )
+
+
+    # ========================================================
+    # SI YA EXISTE -> ACTUALIZAR
+    # ========================================================
+
+    if [[ "${http_code}" == "200" ]]; then
+
+        echo "[UPDATE] La rama ya está protegida."
+        echo "         Aplicando configuración..."
+
+        curl --silent \
+            --show-error \
+            --fail \
+            --request PATCH \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --data "allow_force_push=false" \
+            --data "allowed_to_push[][access_level]=0" \
+            --data "allowed_to_merge[][access_level]=${merge_level}" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/protected_branches/${branch}" |
+        jq '{
+            name,
+            allow_force_push,
+            push_access_levels,
+            merge_access_levels
+        }'
+
+        echo "[OK] Protección actualizada."
+
+
+    # ========================================================
+    # SI NO EXISTE -> CREAR
+    # ========================================================
+
+    elif [[ "${http_code}" == "404" ]]; then
+
+        echo "[CREATE] La rama no está protegida."
+        echo "         Creando protección..."
+
+        curl --silent \
+            --show-error \
+            --fail \
+            --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --data-urlencode "name=${branch}" \
+            --data "push_access_level=0" \
+            --data "merge_access_level=${merge_level}" \
+            --data "allow_force_push=false" \
+            "${GITLAB_URL}/api/v4/projects/${project_id}/protected_branches" |
+        jq '{
+            name,
+            allow_force_push,
+            push_access_levels,
+            merge_access_levels
+        }'
+
+        echo "[OK] Protección creada."
+
+
+    # ========================================================
+    # ERROR
+    # ========================================================
+
+    else
+
+        echo "[ERROR] No fue posible consultar la protección."
+        echo "        Repo: ${project_name}"
+        echo "        Rama: ${branch}"
+        echo "        HTTP: ${http_code}"
+
+        echo "Respuesta GitLab:"
+        cat "${temp_file}"
+
+        rm -f "${temp_file}"
+
+        return 1
+    fi
+
+    rm -f "${temp_file}"
+}
+
+
+# ============================================================
+# CONFIGURAR REPOSITORIO
+# ============================================================
+
+configure_project() {
+
+    local project_id="$1"
+    local project_name="$2"
+
+    echo
+    echo "=================================================="
+    echo "CONFIGURANDO REPOSITORIO"
+    echo "=================================================="
+    echo "Repo : ${project_name}"
+    echo "ID   : ${project_id}"
+    echo "=================================================="
+
+
+    # DEV
+    # Merge: Developers + Maintainers
+    # Push: No one
+
+    configure_branch_protection \
+        "${project_id}" \
+        "${project_name}" \
+        "dev" \
+        30
+
+
+    # QA
+    # Merge: Developers + Maintainers
+    # Push: No one
+
+    configure_branch_protection \
+        "${project_id}" \
+        "${project_name}" \
+        "qa" \
+        30
+
+
+    # MASTER
+    # Merge: Maintainers
+    # Push: No one
+
+    configure_branch_protection \
+        "${project_id}" \
+        "${project_name}" \
+        "master" \
+        40
+}
+
+
+# ============================================================
+# CONSULTAR PROYECTOS DEL GRUPO
+# ============================================================
+
+echo
+echo "=================================================="
+echo "CONFIGURACION MASIVA DE PROTECTED BRANCHES"
+echo "=================================================="
+echo "Group ID: ${GROUP_ID}"
+echo "=================================================="
+
+page=1
+
+while true; do
+
+    echo
+    echo "Consultando proyectos - pagina ${page}..."
+
+    response=$(
+        curl --silent \
+            --show-error \
+            --fail \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            "${GITLAB_URL}/api/v4/groups/${GROUP_ID}/projects?include_subgroups=${INCLUDE_SUBGROUPS}&with_shared=false&per_page=100&page=${page}"
+    )
+
+    project_count=$(echo "${response}" | jq 'length')
+
+    if [[ "${project_count}" -eq 0 ]]; then
+        break
+    fi
+
+
+    # ========================================================
+    # RECORRER REPOSITORIOS
+    # ========================================================
+
+    while IFS=$'\t' read -r project_id project_name; do
+
+        configure_project \
+            "${project_id}" \
+            "${project_name}"
+
+    done < <(
+        echo "${response}" |
+        jq -r '.[] | [.id, .path] | @tsv'
+    )
+
+
+    if [[ "${project_count}" -lt 100 ]]; then
+        break
+    fi
+
+    ((page++))
+done
+
+
+echo
+echo "=================================================="
+echo "PROCESO TERMINADO"
+echo "=================================================="
