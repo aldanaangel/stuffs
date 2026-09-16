@@ -1,0 +1,34 @@
+  # ========================================================
+    # RAMA PRODUCTIVA: MASTER O MAIN
+    # ========================================================
+
+    echo
+    echo "--------------------------------------------------"
+    echo "Detectando rama productiva..."
+
+    if branch_exists "${project_id}" "master"; then
+
+        echo "[OK] Rama productiva detectada: master"
+
+        configure_branch_protection \
+            "${project_id}" \
+            "${project_name}" \
+            "master" \
+            40
+
+    elif branch_exists "${project_id}" "main"; then
+
+        echo "[OK] Rama productiva detectada: main"
+
+        configure_branch_protection \
+            "${project_id}" \
+            "${project_name}" \
+            "main" \
+            40
+
+    else
+
+        echo "[SKIP] El repositorio '${project_name}' no tiene rama master ni main."
+        echo "       No se configuró protección para la rama productiva."
+
+    fi
