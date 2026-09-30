@@ -64,3 +64,66 @@ gitlabCommitStatus(name: 'MR Title Check') {
         echo 'Título válido'
     }
 }
+
+
+pipeline {
+
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    stages {
+
+        stage('MR Information') {
+            steps {
+                script {
+                    echo """
+                    ========================================
+                    Merge Request Information
+                    ========================================
+                    Title  : ${env.gitlabMergeRequestTitle}
+                    Source : ${env.gitlabSourceBranch}
+                    Target : ${env.gitlabTargetBranch}
+                    MR IID : ${env.gitlabMergeRequestIid}
+                    Commit : ${env.gitlabAfter}
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('Validate MR Title') {
+
+            steps {
+
+                gitlabCommitStatus(name: 'MR Title Check') {
+
+                    script {
+
+                        def mrTitle = env.gitlabMergeRequestTitle
+
+                        def titleRegex =
+                            ~/^(feature|fix|hotfix)\/[A-Z]+-\d+ - .+$/
+
+                        if (!mrTitle) {
+                            error(
+                                'No se recibió gitlabMergeRequestTitle'
+                            )
+                        }
+
+                        if (!(mrTitle ==~ titleRegex)) {
+                            error(
+                                "MR Title inválido: '${mrTitle}'"
+                            )
+                        }
+
+                        echo "MR Title válido: ${mrTitle}"
+                    }
+                }
+            }
+        }
+    }
+}
