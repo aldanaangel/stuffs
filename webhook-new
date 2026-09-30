@@ -243,3 +243,102 @@ pipeline {
         }
     }
 }
+
+
+pipeline {
+
+    agent any
+
+    options {
+        // No necesitamos código del repositorio.
+        // Solo validamos metadata del Merge Request.
+        skipDefaultCheckout(true)
+
+        // Nombre EXACTO configurado en:
+        // Manage Jenkins -> System -> GitLab
+        gitLabConnection('gitlab_connection')
+    }
+
+    stages {
+
+        stage('MR Information') {
+            steps {
+                script {
+
+                    echo """
+                    ========================================
+                    Merge Request Information
+                    ========================================
+                    Title          : ${env.gitlabMergeRequestTitle}
+                    Source         : ${env.gitlabSourceBranch}
+                    Target         : ${env.gitlabTargetBranch}
+                    MR IID         : ${env.gitlabMergeRequestIid}
+                    MR Last Commit : ${env.gitlabMergeRequestLastCommit}
+                    Project ID     : ${env.gitlabMergeRequestTargetProjectId}
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('Validate MR Title') {
+            steps {
+
+                script {
+
+                    updateGitlabCommitStatus(
+                        name: 'mr-title-check',
+                        state: 'running'
+                    )
+
+                    def mrTitle = env.gitlabMergeRequestTitle
+
+                    // Temporal para pruebas
+                    def titleRegex = ~/^Edit .+$/
+
+                    if (!mrTitle) {
+                        error('No se recibió gitlabMergeRequestTitle')
+                    }
+
+                    if (!(mrTitle ==~ titleRegex)) {
+                        error("""
+                            El título del Merge Request no cumple
+                            con el formato requerido.
+
+                            Título recibido:
+                            ${mrTitle}
+                        """)
+                    }
+
+                    echo "MR Title válido: ${mrTitle}"
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'success'
+            )
+        }
+
+        failure {
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'failed'
+            )
+        }
+
+        aborted {
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'canceled'
+            )
+        }
+    }
+}
+
+
