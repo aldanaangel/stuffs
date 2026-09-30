@@ -1,0 +1,66 @@
+node {
+
+    properties([
+        gitLabConnection('gitlab'),
+        gitlabBuilds(builds: ['MR Title Check'])
+    ])
+
+    gitlabCommitStatus(name: 'MR Title Check') {
+
+        stage('Validate MR Title') {
+
+            def title = env.gitlabMergeRequestTitle
+
+            // Ejemplo:
+            // feature/ABC-123 - Descripcion del cambio
+            def titleRegex = ~/^(feature|fix|hotfix)\/[A-Z]+-\d+ - .+$/
+
+            echo "MR Title: ${title}"
+
+            if (!title) {
+                error('No se recibió el título del Merge Request')
+            }
+
+            if (!(title ==~ titleRegex)) {
+                error("""
+                    El título del Merge Request no cumple con el formato requerido.
+
+                    Título recibido:
+                    ${title}
+
+                    Formato esperado:
+                    feature|fix|hotfix/ABC-123 - Descripción
+                """)
+            }
+
+            echo 'MR title válido.'
+        }
+    }
+}
+
+
+properties([
+    gitLabConnection('gitlab'),
+    gitlabBuilds(builds: ['MR Title Check'])
+])
+
+gitlabCommitStatus(name: 'MR Title Check') {
+
+    stage('Validate MR Title') {
+
+        def title = env.gitlabMergeRequestTitle
+        def regex = ~/^(feature|fix|hotfix)\/[A-Z]+-\d+ - .+$/
+
+        echo "Validando MR: ${title}"
+
+        if (!title) {
+            error('No se recibió gitlabMergeRequestTitle')
+        }
+
+        if (!(title ==~ regex)) {
+            error("El título '${title}' no cumple con el formato requerido")
+        }
+
+        echo 'Título válido'
+    }
+}
