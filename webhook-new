@@ -191,3 +191,55 @@ pipeline {
         }
     }
 }
+
+
+
+
+pipeline {
+
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        gitLabConnection('gitlab_connection')
+    }
+
+    stages {
+
+        stage('MR Information') {
+            steps {
+                script {
+                    echo """
+                    ========================================
+                    Merge Request Information
+                    ========================================
+                    Title          : ${env.gitlabMergeRequestTitle}
+                    Source         : ${env.gitlabSourceBranch}
+                    Target         : ${env.gitlabTargetBranch}
+                    MR IID         : ${env.gitlabMergeRequestIid}
+                    MR Last Commit : ${env.gitlabMergeRequestLastCommit}
+                    Project ID     : ${env.gitlabMergeRequestTargetProjectId}
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('Notify GitLab') {
+            steps {
+
+                updateGitlabCommitStatus(
+                    name: 'mr-title-check',
+                    state: 'running'
+                )
+
+                echo 'Simulando validación exitosa...'
+
+                updateGitlabCommitStatus(
+                    name: 'mr-title-check',
+                    state: 'success'
+                )
+            }
+        }
+    }
+}
