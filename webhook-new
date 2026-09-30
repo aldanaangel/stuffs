@@ -339,6 +339,149 @@ pipeline {
             )
         }
     }
+
+
+
+
+
+pipeline {
+
+    agent any
+
+    options {
+        gitLabConnection('gitlab_connection')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('MR Information') {
+            steps {
+                script {
+
+                    echo """
+                    ========================================
+                    Merge Request Information
+                    ========================================
+                    Title          : ${env.gitlabMergeRequestTitle}
+                    Source         : ${env.gitlabSourceBranch}
+                    Target         : ${env.gitlabTargetBranch}
+                    MR IID         : ${env.gitlabMergeRequestIid}
+                    MR Last Commit : ${env.gitlabMergeRequestLastCommit}
+                    Project ID     : ${env.gitlabMergeRequestTargetProjectId}
+                    ========================================
+                    """
+                }
+            }
+        }
+
+        stage('Validate MR Title') {
+            steps {
+                script {
+
+                    // Informamos a GitLab que la validación inició
+                    updateGitlabCommitStatus(
+                        name: 'mr-title-check',
+                        state: 'running'
+                    )
+
+                    def mrTitle = env.gitlabMergeRequestTitle
+
+                    /*
+                     * Regex temporal para nuestra prueba.
+                     *
+                     * Ejemplo válido:
+                     * Edit dummy.txt
+                     */
+                    def titleRegex = ~/^Edit .+$/
+
+                    if (!mrTitle) {
+                        error(
+                            'No fue posible obtener el título del Merge Request'
+                        )
+                    }
+
+                    echo "MR Title: ${mrTitle}"
+
+                    if (!(mrTitle ==~ titleRegex)) {
+
+                        error("""
+                        ========================================
+                        INVALID MERGE REQUEST TITLE
+                        ========================================
+
+                        Title:
+                        ${mrTitle}
+
+                        Expected format:
+                        ${titleRegex}
+
+                        ========================================
+                        """)
+                    }
+
+                    echo """
+                    ========================================
+                    MR TITLE VALIDATION SUCCESS
+                    ========================================
+
+                    Title:
+                    ${mrTitle}
+
+                    ========================================
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+
+            echo 'Pipeline SUCCESS - Notifying GitLab'
+
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'success'
+            )
+        }
+
+        failure {
+
+            echo 'Pipeline FAILED - Notifying GitLab'
+
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'failed'
+            )
+        }
+
+        aborted {
+
+            echo 'Pipeline ABORTED - Notifying GitLab'
+
+            updateGitlabCommitStatus(
+                name: 'mr-title-check',
+                state: 'canceled'
+            )
+        }
+
+        always {
+
+            echo """
+            ========================================
+            Pipeline finished
+            Jenkins result: ${currentBuild.currentResult}
+            ========================================
+            """
+        }
+    }
 }
 
 
